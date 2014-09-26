@@ -1,10 +1,13 @@
 (function(scope, empty) {
     var STATE_PENDING = 0,
         STATE_FULFILLED = 1,
-        STATE_REJECTED = 2;
+        STATE_REJECTED = 2,
+        DEBUG = false;
 
     var setImmediate = (function() {
-        if (typeof process === 'object' && process.nextTick) {
+        if (DEBUG) {
+            return function(fn) { fn(); };
+        } else if (typeof process === 'object' && process.nextTick) {
             return function(fn) { process.nextTick(fn); }
         } else if (scope.postMessage === 'function' && !scope.importScripts) {
             var message = 'setImmediate$' + Date.now(), queue = [];
@@ -17,43 +20,41 @@
         }
     })();
 
-    function joinResolve(onFulfilled, resolveNext, rejectNext, progressNext) {
-        return function(value) {
-            var chained;
+    function chainResolve(onFulfilled, resolveNext, rejectNext, progressNext) {
+        return function(promise, value) {
             try {
-                if (typeof onFulfilled === 'function')
-                    chained = onFulfilled(value), chained = chained !== empty ? chained : value;
-                else
-                    chained = value;
+                var out = value;
+                if (typeof onFulfilled === 'function') out = onFulfilled(value), out = out !== empty ? out : value;
+                var then = out && out.then;
+                if (out === promise || value === promise) throw new TypeError("same promise");
+                else if (typeof then === 'function') then.call(out, resolveNext, rejectNext, progressNext);
+                else resolveNext(out);
             }
             catch (e) {
                 rejectNext(e);
             }
-            if (chained && typeof chained.then === 'function')
-                chained.then(resolveNext, rejectNext, progressNext);
-            else
-                resolveNext(chained);
         }
     }
 
-    function joinReject(onRejected, resolveNext, rejectNext, progressNext) {
-        return function(reason) {
-            var chained;
+    function chainReject(onRejected, resolveNext, rejectNext, progressNext) {
+        return function(promise, reason) {
             try {
-                if (typeof onRejected === 'function')
-                    chained = onRejected(reason), chained = chained !== empty ? chained : reason;
-                else
-                    chained = reason;
+                var out;
+                if (typeof onRejected === 'function') out = onRejected(reason);
+                var then = out && out.then;
+                if (out === promise || reason === promise) throw new TypeError("same promise");
+                else if (out === empty) rejectNext(reason);
+                else if (typeof then === 'function') then.call(out, resolveNext, rejectNext, progressNext);
+                else resolveNext(out);
             }
             catch (e) {
-                chained = e;
+                rejectNext(e);
             }
-            rejectNext(chained);
         }
     }
 
-    function joinProgress(onProgress, resolveNext, rejectNext, progressNext) {
-        return function(value) {
+    function chainProgress(onProgress, resolveNext, rejectNext, progressNext) {
+        return function(promise, value) {
             try {
                 if (typeof onProgress === 'function')
                     onProgress(value);
@@ -63,13 +64,16 @@
         }
     }
 
+    var tag = 0;
+
     function make(resolver, canceller) {
         var queue = [], state = STATE_PENDING, keep;
 
-        if (resolver) resolver(resolveMe, rejectMe, progressMe);
-
-        var prom = {};
+        var prom = {tag: tag++};
         prom.then = then, canceller && (prom.cancel = cancel);
+
+        if (resolver) resolver.call(prom, resolveMe, rejectMe, progressMe);
+
         return prom;
 
         function resolveMe(value) {
@@ -101,24 +105,24 @@
         }
 
         function cancelMe(reason) { rejectMe(reason); }
-        function cancel() { canceller(cancelMe); }
+        function cancel() { canceller.call(prom, cancelMe); }
 
         function then(onFulfilled, onRejected, onProgress) {
             if (state === STATE_PENDING) {
                 return make(function (resolveNext, rejectNext, progressNext) {
                     queue.push([
-                        joinResolve(onFulfilled, resolveNext, rejectNext, progressNext),
-                        joinReject(onRejected, resolveNext, rejectNext, progressNext),
-                        joinProgress(onProgress, resolveNext, rejectNext, progressNext)
+                        chainResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, this),
+                        chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this),
+                        chainProgress(onProgress, resolveNext, rejectNext, progressNext).bind(null, this)
                     ]);
                 }, canceller);
             } else if (state === STATE_FULFILLED) {
                 return make(function(resolveNext, rejectNext, progressNext) {
-                    setImmediate(joinResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, keep));
+                    setImmediate(chainResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, this, keep));
                 }, canceller);
             } else if (state === STATE_REJECTED) {
                 return make(function(resolveNext, rejectNext, progressNext) {
-                    setImmediate(joinReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, keep));
+                    setImmediate(chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this, keep));
                 }, canceller);
             }
         }

@@ -1,10 +1,30 @@
 var vor = require('../vor'),
-    dummy = { dummy: "dummy" };
+    dummy = {dummy: "dummy"},
+    sentinel = {sentinel: "sentinel"},
+    sentinel2 = {sentinel: "sentinel2"},
+    sentinel3 = {sentinel: "sentinel3"};
 
-vor.rejected(dummy).then(function() {}, undefined).then(null, function(reason) {
-   console.log('REJECT', reason);
+numberOfTimesThenWasRetrieved = 0;
+
+function xFactory() {
+    return Object.create(null, {
+        then: {
+            get: function () {
+                ++numberOfTimesThenWasRetrieved;
+                return function thenMethodForX(onFulfilled) {
+                    onFulfilled();
+                };
+            }
+        }
+    });
+}
+
+var promise = vor.resolved(dummy).then(function onBasePromiseFulfilled() {
+    return xFactory();
 });
 
-vor.resolved(dummy).then(undefined, function () { }).then(function (value) {
-    console.log('RESOLVE', value);
-}, null);
+promise.then(function () {
+    //assert.strictEqual(numberOfTimesThenWasRetrieved, 1);
+    //done();
+    console.log('#:', numberOfTimesThenWasRetrieved);
+});
