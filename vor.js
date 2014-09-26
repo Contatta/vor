@@ -1,13 +1,11 @@
 (function(scope, empty) {
+    'use strict';
     var STATE_PENDING = 0,
         STATE_FULFILLED = 1,
-        STATE_REJECTED = 2,
-        DEBUG = false;
+        STATE_REJECTED = 2;
 
     var setImmediate = (function() {
-        if (DEBUG) {
-            return function(fn) { fn(); };
-        } else if (typeof process === 'object' && process.nextTick) {
+        if (typeof process === 'object' && process.nextTick) {
             return function(fn) { process.nextTick(fn); }
         } else if (scope.postMessage === 'function' && !scope.importScripts) {
             var message = 'setImmediate$' + Date.now(), queue = [];
@@ -64,12 +62,10 @@
         }
     }
 
-    var tag = 0;
-
     function make(resolver, canceller) {
         var queue = [], state = STATE_PENDING, keep;
 
-        var prom = {tag: tag++};
+        var prom = {};
         prom.then = then, canceller && (prom.cancel = cancel);
 
         if (resolver) resolver.call(prom, resolveMe, rejectMe, progressMe);
@@ -78,6 +74,12 @@
 
         function resolveMe(value) {
             if (state !== STATE_PENDING) return;
+            try {
+                var then = value && value.then;
+                if (typeof then === 'function') return setImmediate(chainResolve(null, resolveMe, rejectMe, progressMe).bind(null, this, value));
+            } catch (e) {
+                return rejectMe(e);
+            }
             state = STATE_FULFILLED, keep = value;
             function drainResolveQueue() {
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][0] && queue[i][0](keep);
@@ -88,6 +90,12 @@
 
         function rejectMe(reason) {
             if (state !== STATE_PENDING) return;
+            try {
+                var then = reason && reason.then;
+                if (typeof then === 'function') return setImmediate(chainReject(null, resolveMe, rejectMe, progressMe).bind(null, this, reason));
+            } catch (e) {
+                return rejectMe(e);
+            }
             state = STATE_REJECTED, keep = reason;
             function drainRejectQueue() {
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][1] && queue[i][1](keep);
@@ -98,10 +106,10 @@
 
         function progressMe(value) {
             if (state !== STATE_PENDING) return;
-            function drainQueue() {
+            function iterateProgressQueue() {
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][2] && queue[i][2](value);
             }
-            setImmediate(drainQueue);
+            setImmediate(iterateProgressQueue);
         }
 
         function cancelMe(reason) { rejectMe(reason); }
@@ -137,8 +145,7 @@
         }).bind(this), cancel && (function(cancelMe) {
             cancelMe(cancel(this));
         }).bind(this));
-        this.then = this.promise.then;
-        this.cancel = this.promise.cancel;
+        this.then = this.promise.then, cancel && (this.cancel = this.promise.cancel);
     }
 
     make.Deferred = Deferred;
