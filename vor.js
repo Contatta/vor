@@ -1,10 +1,12 @@
 (function(scope, empty) {
     'use strict';
+
     var STATE_PENDING = 0,
         STATE_FULFILLED = 1,
-        STATE_REJECTED = 2;
+        STATE_REJECTED = 2,
+        STATE_TO_STRING = {0:'pending', 1:'fulfilled', 2:'rejected'};
 
-    var enqueue = (function() {
+    var task = (function() {
         if (typeof process === 'object' && process.nextTick) {
             return function(fn) { process.nextTick(fn); }
         } else if (scope.postMessage === 'function' && !scope.importScripts) {
@@ -65,18 +67,21 @@
     function make(resolver, canceller) {
         var queue = [], state = STATE_PENDING, keep;
 
-        var prom = {};
-        prom.then = then, canceller && (prom.cancel = cancel);
+        var promise = {};
 
-        if (resolver) resolver.call(prom, resolveMe, rejectMe, progressMe);
+        promise.then = then;
+        promise.state = function() { return STATE_TO_STRING[state]; };
 
-        return prom;
+        if (canceller) promise.cancel = function() { canceller.call(promise, cancelMe); };
+        if (resolver) resolver.call(promise, resolveMe, rejectMe, progressMe);
+
+        return promise;
 
         function resolveMe(value) {
             if (state !== STATE_PENDING) return;
             try {
                 var then = value && value.then;
-                if (typeof then === 'function') return enqueue(chainResolve(null, resolveMe, rejectMe, progressMe).bind(null, this, value));
+                if (typeof then === 'function') return task(chainResolve(null, resolveMe, rejectMe, progressMe).bind(null, this, value));
             } catch (e) {
                 return rejectMe(e);
             }
@@ -85,14 +90,14 @@
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][0] && queue[i][0](keep);
                 queue = null;
             }
-            enqueue(drainResolveQueue);
+            task(drainResolveQueue);
         }
 
         function rejectMe(reason) {
             if (state !== STATE_PENDING) return;
             try {
                 var then = reason && reason.then;
-                if (typeof then === 'function') return enqueue(chainReject(null, resolveMe, rejectMe, progressMe).bind(null, this, reason));
+                if (typeof then === 'function') return task(chainReject(null, resolveMe, rejectMe, progressMe).bind(null, this, reason));
             } catch (e) {
                 return rejectMe(e);
             }
@@ -101,7 +106,7 @@
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][1] && queue[i][1](keep);
                 queue = null;
             }
-            enqueue(drainRejectQueue)
+            task(drainRejectQueue)
         }
 
         function progressMe(value) {
@@ -109,11 +114,10 @@
             function iterateProgressQueue() {
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][2] && queue[i][2](value);
             }
-            enqueue(iterateProgressQueue);
+            task(iterateProgressQueue);
         }
 
         function cancelMe(reason) { rejectMe(reason); }
-        function cancel() { canceller.call(prom, cancelMe); }
 
         function then(onFulfilled, onRejected, onProgress) {
             if (state === STATE_PENDING) {
@@ -126,11 +130,11 @@
                 }, canceller);
             } else if (state === STATE_FULFILLED) {
                 return make(function(resolveNext, rejectNext, progressNext) {
-                    enqueue(chainResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, this, keep));
+                    task(chainResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, this, keep));
                 }, canceller);
             } else if (state === STATE_REJECTED) {
                 return make(function(resolveNext, rejectNext, progressNext) {
-                    enqueue(chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this, keep));
+                    task(chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this, keep));
                 }, canceller);
             }
         }
