@@ -16,51 +16,88 @@
         }
     })();
 
-    function promise(resolver, canceller) {
+    function joinResolve(onFulfilled, resolveNext, rejectNext, progressNext) {
+        return function(value) {
+            var chained;
+            try {
+                if (typeof onFulfilled === 'function')
+                    chained = onFulfilled(value), chained = chained !== empty ? chained : value;
+                else
+                    chained = value;
+            }
+            catch (e) {
+                rejectNext(e);
+            }
+            if (chained && typeof chained.then === 'function')
+                chained.then(resolveNext, rejectNext, progressNext);
+            else
+                resolveNext(chained);
+        }
+    }
+
+    function joinReject(onRejected, resolveNext, rejectNext, progressNext) {
+        return function(reason) {
+            var chained;
+            try {
+                if (typeof onRejected === 'function')
+                    chained = onRejected(reason), chained = chained !== empty ? chained : reason;
+                else
+                    chained = reason;
+            }
+            catch (e) {
+                chained = e;
+            }
+            rejectNext(chained);
+        }
+    }
+
+    function joinProgress(onProgress, resolveNext, rejectNext, progressNext) {
+        return function(value) {
+            try {
+                if (typeof onProgress === 'function')
+                    onProgress(value);
+            }
+            catch (e) {}
+            progressNext(value);
+        }
+    }
+
+    function make(resolver, canceller) {
         var queue = [], state = STATE_PENDING, keep;
 
         if (resolver) resolver(resolveMe, rejectMe, progressMe);
 
-        return {
-            then: then,
-            cancel: cancel
-        };
+        var prom = {};
+        prom.then = then, canceller && (prom.cancel = cancel);
+        return prom;
 
         function resolveMe(value) {
             if (state !== STATE_PENDING) return;
-
             state = STATE_FULFILLED, keep = value;
-
-            function resolveDrain() {
+            function drainQueue() {
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][0] && queue[i][0](keep);
                 queue = null;
             }
-
-            if (typeof keep.then === 'function') keep.then(resolveDrain);
-            else resolveDrain();
+            if (typeof keep.then === 'function') keep.then(drainQueue);
+            else setImmediate(drainQueue);
         }
 
         function rejectMe(reason) {
             if (state !== STATE_PENDING) return;
-
             state = STATE_REJECTED, keep = reason;
-
-            function rejectDrain() {
+            function drainQueue() {
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][1] && queue[i][1](keep);
                 queue = null;
             }
-
-            rejectDrain();
+            setImmediate(drainQueue)
         }
 
         function progressMe(value) {
             if (state !== STATE_PENDING) return;
-
-            function progressUpdate() {
+            function drainQueue() {
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][2] && queue[i][2](value);
             }
-
-            progressUpdate();
+            setImmediate(drainQueue);
         }
 
         function cancelMe(reason) {
@@ -73,39 +110,20 @@
 
         function then(onFulfilled, onRejected, onProgress) {
             if (state === STATE_PENDING) {
-                return promise(function (resolveNext, rejectNext, progressNext) {
-                    queue.push([function(value) {
-                        try {
-                            var result = onFulfilled(value);
-                            if (result && typeof result.then === 'function') result.then(resolveNext, rejectNext, progressNext);
-                            else resolveNext(result !== empty ? result : value);
-                        }
-                        catch (e) {
-                            rejectNext(e);
-                        }
-                    }, function(reason) {
-                        onRejected(reason);
-                        rejectNext(reason);
-                    }, function(value) {
-                        onProgress(value);
-                        progressNext(value);
-                    }]);
+                return make(function (resolveNext, rejectNext, progressNext) {
+                    queue.push([
+                        joinResolve(onFulfilled, resolveNext, rejectNext, progressNext),
+                        joinReject(onRejected, resolveNext, rejectNext, progressNext),
+                        joinProgress(onProgress, resolveNext, rejectNext, progressNext)
+                    ]);
                 }, canceller);
-            } else if (state === STATE_FULFILLED && typeof onFulfilled === 'function') {
-                return promise(function(resolveNext, rejectNext, progressNext) {
-                    try {
-                        var result = onFulfilled(keep);
-                        if (result && typeof result.then === 'function') result.then(resolveNext, rejectNext, progressNext);
-                        else resolveNext(result !== empty ? result : value);
-                    }
-                    catch (e) {
-                        rejectNext(e);
-                    }
+            } else if (state === STATE_FULFILLED) {
+                return make(function(resolveNext, rejectNext, progressNext) {
+                    setImmediate(joinResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, keep));
                 }, canceller);
-            } else if (state === STATE_REJECTED && typeof onRejected === 'function') {
-                return promise(function(resolveNext, rejectNext, progressNext) {
-                    onRejected(keep);
-                    rejectNext(keep);
+            } else if (state === STATE_REJECTED) {
+                return make(function(resolveNext, rejectNext, progressNext) {
+                    setImmediate(joinReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, keep));
                 }, canceller);
             }
         }
@@ -113,7 +131,7 @@
 
     function Deferred(cancel) {
         if (!(this instanceof Deferred)) return new Deferred(cancel);
-        this.promise = promise((function(resolveMe, rejectMe, progressMe) {
+        this.promise = make((function(resolveMe, rejectMe, progressMe) {
             this.resolve = resolveMe;
             this.reject = rejectMe;
             this.progress = progressMe;
@@ -124,9 +142,12 @@
         this.cancel = this.promise.cancel;
     }
 
-    promise.Deferred = Deferred;
+    make.Deferred = Deferred;
 
-    if (typeof module != 'undefined' && module.exports) module.exports = promise;
-    else if (typeof define == 'function' && typeof define.amd == 'object') define(function() { return promise; });
-    else global.vor = promise;
+    make.rejected = function(reason) { return make(function(_, reject) { reject(reason); }); };
+    make.resolved = function(value) { return make(function(resolve) { resolve(value); }); };
+
+    if (typeof module != 'undefined' && module.exports) module.exports = make;
+    else if (typeof define == 'function' && typeof define.amd == 'object') define(function() { return make; });
+    else global.vor = make;
 })(this);
