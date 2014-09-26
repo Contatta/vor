@@ -150,6 +150,7 @@
             cancelMe(cancel(this));
         }).bind(this));
         this.then = this.promise.then, cancel && (this.cancel = this.promise.cancel);
+        this.state = this.promise.state;
     }
 
     make.Deferred = Deferred;
