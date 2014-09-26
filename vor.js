@@ -6,19 +6,23 @@
         STATE_REJECTED = 2,
         STATE_TO_STRING = {0:'pending', 1:'fulfilled', 2:'rejected'};
 
-    var task = (function() {
-        if (typeof process === 'object' && process.nextTick) {
-            return function(fn) { process.nextTick(fn); }
-        } else if (scope.postMessage === 'function' && !scope.importScripts) {
-            var message = 'enqueue$' + Date.now(), queue = [];
-            scope.addEventListener("message", function(evt) {
-                if (evt.source === scope && evt.data === message) evt.stopPropagation(), (queue.length > 0) && queue.shift()();
-            });
-            return function(fn) { queue.push(fn), scope.postMessage(message, "*"); }
-        } else {
-            return function(fn) { setTimeout(fn, 0); }
-        }
-    })();
+    var taskAsync = (function() {
+            if (typeof process === 'object' && process.nextTick) {
+                return function(fn) { process.nextTick(fn); }
+            } else if (scope.postMessage === 'function' && !scope.importScripts) {
+                var message = 'enqueue$' + Date.now(), queue = [];
+                scope.addEventListener("message", function(evt) {
+                    if (evt.source === scope && evt.data === message) evt.stopPropagation(), (queue.length > 0) && queue.shift()();
+                });
+                return function(fn) { queue.push(fn), scope.postMessage(message, "*"); }
+            } else {
+                return function(fn) { setTimeout(fn, 0); }
+            }
+        })(),
+        taskSync = (function() {
+            return function(fn) { fn(); };
+        })(),
+        task = taskAsync;
 
     function chainResolve(onFulfilled, resolveNext, rejectNext, progressNext) {
         return function(promise, value) {
@@ -64,7 +68,13 @@
         }
     }
 
+    function env(options) {
+        if ('async' in options) task = options.async ? taskAsync : taskSync;
+    }
+
     function make(resolver, canceller) {
+        if (typeof resolver === 'object') return env(resolver);
+
         var queue = [], state = STATE_PENDING, keep;
 
         var promise = {};
@@ -158,7 +168,13 @@
     make.rejected = function(reason) { return make(function(_, reject) { reject(reason); }); };
     make.resolved = function(value) { return make(function(resolve) { resolve(value); }); };
 
-    if (typeof module != 'undefined' && module.exports) module.exports = make;
-    else if (typeof define == 'function' && typeof define.amd == 'object') define(function() { return make; });
-    else scope.vor = make;
+    if (typeof module != 'undefined' && module.exports) {
+        module.exports = make;
+    }
+    else if (typeof define == 'function' && typeof define.amd == 'object') {
+        define(['module'], function (module) { env(module.config && module.config() || {}); return make; });
+    }
+    else {
+        scope.vor = make;
+    }
 })(this);

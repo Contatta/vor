@@ -4,6 +4,10 @@ var vor = require('../vor'),
     sentinel2 = {sentinel: "sentinel2"},
     sentinel3 = {sentinel: "sentinel3"};
 
+vor({async:false});
+vor.resolved(dummy).then(function(val) { console.log('dummy:', dummy); });
+console.log('after');
+
 function xFactory() {
     return {
         tag: 'x',
