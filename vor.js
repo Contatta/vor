@@ -1,17 +1,18 @@
-(function(global, empty) {
+(function(scope, empty) {
     var STATE_PENDING = 0,
         STATE_FULFILLED = 1,
         STATE_REJECTED = 2;
 
     var setImmediate = (function() {
-        if (global.postMessage && !global.importScripts) {
+        if (typeof process === 'object' && process.nextTick) {
+            return function(fn) { process.nextTick(fn); }
+        } else if (scope.postMessage === 'function' && !scope.importScripts) {
             var message = 'setImmediate$' + Date.now(), queue = [];
-            global.addEventListener("message", function(evt) {
-                if (evt.source === global && evt.data === message) evt.stopPropagation(), (queue.length > 0) && queue.shift()();
+            scope.addEventListener("message", function(evt) {
+                if (evt.source === scope && evt.data === message) evt.stopPropagation(), (queue.length > 0) && queue.shift()();
             });
-            return function(fn) { queue.push(fn), global.postMessage(message, "*"); }
-        }
-        else {
+            return function(fn) { queue.push(fn), scope.postMessage(message, "*"); }
+        } else {
             return function(fn) { setTimeout(fn, 0); }
         }
     })();
@@ -99,13 +100,8 @@
             setImmediate(drainQueue);
         }
 
-        function cancelMe(reason) {
-            rejectMe(reason);
-        }
-
-        function cancel() {
-            canceller && canceller(cancelMe);
-        }
+        function cancelMe(reason) { rejectMe(reason); }
+        function cancel() { canceller(cancelMe); }
 
         function then(onFulfilled, onRejected, onProgress) {
             if (state === STATE_PENDING) {
@@ -148,5 +144,5 @@
 
     if (typeof module != 'undefined' && module.exports) module.exports = make;
     else if (typeof define == 'function' && typeof define.amd == 'object') define(function() { return make; });
-    else global.vor = make;
+    else scope.vor = make;
 })(this);
