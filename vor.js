@@ -74,22 +74,21 @@
         function resolveMe(value) {
             if (state !== STATE_PENDING) return;
             state = STATE_FULFILLED, keep = value;
-            function drainQueue() {
+            function drainResolveQueue() {
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][0] && queue[i][0](keep);
                 queue = null;
             }
-            if (typeof keep.then === 'function') keep.then(drainQueue);
-            else setImmediate(drainQueue);
+            setImmediate(drainResolveQueue);
         }
 
         function rejectMe(reason) {
             if (state !== STATE_PENDING) return;
             state = STATE_REJECTED, keep = reason;
-            function drainQueue() {
+            function drainRejectQueue() {
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][1] && queue[i][1](keep);
                 queue = null;
             }
-            setImmediate(drainQueue)
+            setImmediate(drainRejectQueue)
         }
 
         function progressMe(value) {
