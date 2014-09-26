@@ -4,11 +4,11 @@
         STATE_FULFILLED = 1,
         STATE_REJECTED = 2;
 
-    var setImmediate = (function() {
+    var enqueue = (function() {
         if (typeof process === 'object' && process.nextTick) {
             return function(fn) { process.nextTick(fn); }
         } else if (scope.postMessage === 'function' && !scope.importScripts) {
-            var message = 'setImmediate$' + Date.now(), queue = [];
+            var message = 'enqueue$' + Date.now(), queue = [];
             scope.addEventListener("message", function(evt) {
                 if (evt.source === scope && evt.data === message) evt.stopPropagation(), (queue.length > 0) && queue.shift()();
             });
@@ -76,7 +76,7 @@
             if (state !== STATE_PENDING) return;
             try {
                 var then = value && value.then;
-                if (typeof then === 'function') return setImmediate(chainResolve(null, resolveMe, rejectMe, progressMe).bind(null, this, value));
+                if (typeof then === 'function') return enqueue(chainResolve(null, resolveMe, rejectMe, progressMe).bind(null, this, value));
             } catch (e) {
                 return rejectMe(e);
             }
@@ -85,14 +85,14 @@
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][0] && queue[i][0](keep);
                 queue = null;
             }
-            setImmediate(drainResolveQueue);
+            enqueue(drainResolveQueue);
         }
 
         function rejectMe(reason) {
             if (state !== STATE_PENDING) return;
             try {
                 var then = reason && reason.then;
-                if (typeof then === 'function') return setImmediate(chainReject(null, resolveMe, rejectMe, progressMe).bind(null, this, reason));
+                if (typeof then === 'function') return enqueue(chainReject(null, resolveMe, rejectMe, progressMe).bind(null, this, reason));
             } catch (e) {
                 return rejectMe(e);
             }
@@ -101,7 +101,7 @@
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][1] && queue[i][1](keep);
                 queue = null;
             }
-            setImmediate(drainRejectQueue)
+            enqueue(drainRejectQueue)
         }
 
         function progressMe(value) {
@@ -109,7 +109,7 @@
             function iterateProgressQueue() {
                 for (var i = 0, l = queue.length; i < l; i++) queue[i][2] && queue[i][2](value);
             }
-            setImmediate(iterateProgressQueue);
+            enqueue(iterateProgressQueue);
         }
 
         function cancelMe(reason) { rejectMe(reason); }
@@ -126,11 +126,11 @@
                 }, canceller);
             } else if (state === STATE_FULFILLED) {
                 return make(function(resolveNext, rejectNext, progressNext) {
-                    setImmediate(chainResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, this, keep));
+                    enqueue(chainResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, this, keep));
                 }, canceller);
             } else if (state === STATE_REJECTED) {
                 return make(function(resolveNext, rejectNext, progressNext) {
-                    setImmediate(chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this, keep));
+                    enqueue(chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this, keep));
                 }, canceller);
             }
         }
