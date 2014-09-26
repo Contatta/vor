@@ -1,0 +1,30 @@
+{
+    "name": "vor",
+    "description": "Vör - The goddess associated with oaths and agreements.  Also, yet another JavaScript Promises library.",
+    "version": "0.1.0",
+    "homepage": "https://github.com/Contatta/vor",
+    "author": {
+        "name": "Michael Morton",
+        "email": "mmorton@icanhascode.com"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git://github.com/Contatta/vor.git"
+    },
+    "bugs": {
+        "url": "https://github.com/Contatta/vor/issues"
+    },
+    "licenses": [
+        {
+            "type": "MIT",
+            "url": "https://github.com/Contatta/vor/blob/master/LICENSE"
+        }
+    ],
+    "main": "./vor",
+    "devDependencies": {
+        "promises-aplus-tests": "*"
+    },
+    "scripts": {
+        "test": "promises-aplus-tests test/vor-adapter"
+    }
+}
