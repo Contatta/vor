@@ -22,7 +22,7 @@
     ],
     "main": "./vor",
     "devDependencies": {
-        "promises-aplus-tests": "*"
+        "promises-aplus-tests": "~1"
     },
     "scripts": {
         "test": "promises-aplus-tests test/vor-adapter"

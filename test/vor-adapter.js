@@ -9,3 +9,11 @@ exports.fulfilled = function(value) {
 exports.rejected = function(reason) {
     return vor(function(resolve, reject) { reject(reason); });
 };
+exports.pending = function() {
+    var pending = {};
+    pending.promise = vor(function(resolve, reject) {
+        pending.fulfill = resolve;
+        pending.reject = reject;
+    });
+    return pending;
+};
