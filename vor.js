@@ -136,7 +136,8 @@
             task(iterateProgressQueue);
         }
         function cancelMe(reason) {
-            rejectMe(reason);
+            if (state !== STATE_PENDING) return;
+            rejectMe(reason !== empty ? reason : new CancelError());
         }
 
         function promiseTag() { return tagged; }
@@ -150,15 +151,15 @@
                         chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this),
                         chainProgress(onProgress, resolveNext, rejectNext, progressNext).bind(null, this)
                     ]);
-                }, canceler, tagger(tag));
+                }, canceler && promiseCancel, tagger(tag)); // cancel is always the original (propagates through reject)
             } else if (state === STATE_FULFILLED) {
                 return make(function(resolveNext, rejectNext, progressNext) {
                     task(chainResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, this, keep));
-                }, canceler, tagger(tag));
+                }, canceler && promiseCancel, tagger(tag)); // cancel is always the original (propagates through reject)
             } else if (state === STATE_REJECTED) {
                 return make(function(resolveNext, rejectNext, progressNext) {
                     task(chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this, keep));
-                }, canceler, tagger(tag));
+                }, canceler && promiseCancel, tagger(tag)); // cancel is always the original (propagates through reject)
             }
         }
     }
@@ -182,6 +183,18 @@
     }
 
     make.Deferred = Deferred;
+
+    function CancelError(message) {
+        this.message = message;
+        this.name = 'CancelError';
+        var err = Error(message);
+        this.stack = err.stack;
+    }
+
+    CancelError.prototype = Object.create(Error.prototype);
+    CancelError.prototype.constructor = CancelError;
+
+    make.CancelError = CancelError;
 
     function rejected(reason) {
         return make(function(_, reject) { reject(reason); });

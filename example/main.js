@@ -35,3 +35,9 @@ promise.then(function onPromiseFulfilled(value) {
     //done();
     console.log('VAL:', value);
 });
+
+var a = vor.Deferred(function() {}).then(null, function(reason) {
+    console.log('CANCEL:', reason);
+});
+
+a.cancel();
