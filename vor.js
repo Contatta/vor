@@ -8,24 +8,24 @@
 
     var taskAsync = (function() {
             if (typeof process === 'object' && process.nextTick) {
-                return function(fn) { process.nextTick(fn); }
+                return function taskAsyncTick(fn) { process.nextTick(fn); }
             } else if (scope.postMessage === 'function' && !scope.importScripts) {
                 var message = 'enqueue$' + Date.now(), queue = [];
                 scope.addEventListener("message", function(evt) {
                     if (evt.source === scope && evt.data === message) evt.stopPropagation(), (queue.length > 0) && queue.shift()();
                 });
-                return function(fn) { queue.push(fn), scope.postMessage(message, "*"); }
+                return function taskAsyncMessage(fn) { queue.push(fn), scope.postMessage(message, "*"); }
             } else {
-                return function(fn) { setTimeout(fn, 0); }
+                return function taskAsyncTimeout(fn) { setTimeout(fn, 0); }
             }
         })(),
         taskSync = (function() {
-            return function(fn) { fn(); };
+            return function taskSyncCall(fn) { fn(); };
         })(),
         task = taskAsync;
 
     function chainResolve(onFulfilled, resolveNext, rejectNext, progressNext) {
-        return function(promise, value) {
+        return function onChainResolve(promise, value) {
             try {
                 var out = value;
                 if (typeof onFulfilled === 'function') out = onFulfilled(value), out = out !== empty ? out : value;
@@ -41,7 +41,7 @@
     }
 
     function chainReject(onRejected, resolveNext, rejectNext, progressNext) {
-        return function(promise, reason) {
+        return function onChainReject(promise, reason) {
             try {
                 var out;
                 if (typeof onRejected === 'function') out = onRejected(reason);
@@ -58,7 +58,7 @@
     }
 
     function chainProgress(onProgress, resolveNext, rejectNext, progressNext) {
-        return function(promise, value) {
+        return function onChainProgress(promise, value) {
             try {
                 if (typeof onProgress === 'function')
                     onProgress(value);
@@ -72,17 +72,28 @@
         if ('async' in options) task = options.async ? taskAsync : taskSync;
     }
 
-    function make(resolver, canceller) {
+    var tagger = (function() {
+        var uid = 0;
+        return function(pre) { return (pre ? pre + '.' : 'vor') + uid++; }
+    })();
+
+    function make(resolver, canceler, tag) {
         if (typeof resolver === 'object') return env(resolver);
+        if (typeof canceler === 'string') tag = canceler, canceler = null;
 
-        var queue = [], state = STATE_PENDING, keep;
+        var state = STATE_PENDING, queue = [], tagged = tag || tagger(), keep;
 
-        var promise = {};
+        var promise = {
+            tag: promiseTag,
+            then: promiseThen,
+            state: promiseState
+        };
 
-        promise.then = then;
-        promise.state = function() { return STATE_TO_STRING[state]; };
+        if (canceler)
+        {
+            promise.cancel = promiseCancel
+        }
 
-        if (canceller) promise.cancel = function() { canceller.call(promise, cancelMe); };
         if (resolver) resolver.call(promise, resolveMe, rejectMe, progressMe);
 
         return promise;
@@ -102,7 +113,6 @@
             }
             task(drainResolveQueue);
         }
-
         function rejectMe(reason) {
             if (state !== STATE_PENDING) return;
             try {
@@ -118,7 +128,6 @@
             }
             task(drainRejectQueue)
         }
-
         function progressMe(value) {
             if (state !== STATE_PENDING) return;
             function iterateProgressQueue() {
@@ -126,10 +135,14 @@
             }
             task(iterateProgressQueue);
         }
+        function cancelMe(reason) {
+            rejectMe(reason);
+        }
 
-        function cancelMe(reason) { rejectMe(reason); }
-
-        function then(onFulfilled, onRejected, onProgress) {
+        function promiseTag() { return tagged; }
+        function promiseState() { return STATE_TO_STRING[state]; }
+        function promiseCancel() { canceler.call(promise, cancelMe); }
+        function promiseThen(onFulfilled, onRejected, onProgress) {
             if (state === STATE_PENDING) {
                 return make(function (resolveNext, rejectNext, progressNext) {
                     queue.push([
@@ -137,15 +150,15 @@
                         chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this),
                         chainProgress(onProgress, resolveNext, rejectNext, progressNext).bind(null, this)
                     ]);
-                }, canceller);
+                }, canceler, tagger(tag));
             } else if (state === STATE_FULFILLED) {
                 return make(function(resolveNext, rejectNext, progressNext) {
                     task(chainResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, this, keep));
-                }, canceller);
+                }, canceler, tagger(tag));
             } else if (state === STATE_REJECTED) {
                 return make(function(resolveNext, rejectNext, progressNext) {
                     task(chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this, keep));
-                }, canceller);
+                }, canceler, tagger(tag));
             }
         }
     }
@@ -159,14 +172,27 @@
         }).bind(this), cancel && (function(cancelMe) {
             cancelMe(cancel(this));
         }).bind(this));
-        this.then = this.promise.then, cancel && (this.cancel = this.promise.cancel);
+        this.tag = this.promise.tag;
+        this.then = this.promise.then;
         this.state = this.promise.state;
+        if (cancel)
+        {
+            this.cancel = this.promise.cancel;
+        }
     }
 
     make.Deferred = Deferred;
 
-    make.rejected = function(reason) { return make(function(_, reject) { reject(reason); }); };
-    make.resolved = function(value) { return make(function(resolve) { resolve(value); }); };
+    function rejected(reason) {
+        return make(function(_, reject) { reject(reason); });
+    }
+
+    function resolved(value) {
+        return make(function(resolve) { resolve(value); });
+    }
+
+    make.rejected = rejected;
+    make.resolved = resolved;
 
     if (typeof module != 'undefined' && module.exports) {
         module.exports = make;
