@@ -165,11 +165,11 @@
 
     function Deferred(cancel) {
         if (!(this instanceof Deferred)) return new Deferred(cancel);
-        this.promise = make((function(resolveMe, rejectMe, progressMe) {
+        this.promise = make((function deferredResolver(resolveMe, rejectMe, progressMe) {
             this.resolve = resolveMe;
             this.reject = rejectMe;
             this.progress = progressMe;
-        }).bind(this), cancel && (function(cancelMe) {
+        }).bind(this), cancel && (function deferredCanceler(cancelMe) {
             cancelMe(cancel(this));
         }).bind(this));
         this.tag = this.promise.tag;
