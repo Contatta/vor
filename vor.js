@@ -102,7 +102,7 @@
             if (state !== STATE_PENDING) return;
             try {
                 var then = value && value.then;
-                if (typeof then === 'function') return task(chainResolve(null, resolveMe, rejectMe, progressMe).bind(null, this, value));
+                if (typeof then === 'function') { then.call(value, resolveMe, rejectMe, progressMe); return; }
             } catch (e) {
                 return rejectMe(e);
             }
@@ -117,7 +117,7 @@
             if (state !== STATE_PENDING) return;
             try {
                 var then = reason && reason.then;
-                if (typeof then === 'function') return task(chainReject(null, resolveMe, rejectMe, progressMe).bind(null, this, reason));
+                if (typeof then === 'function') { then.call(reason, resolveMe, rejectMe, progressMe); return; }
             } catch (e) {
                 return rejectMe(e);
             }
@@ -204,8 +204,52 @@
         return make(function(resolve) { resolve(value); });
     }
 
+    function when(valueOrPromise, onFulfilled, onRejected, onProgress) {
+        var then = valueOrPromise && valueOrPromise.then;
+        if (typeof then === 'function') {
+            if (arguments.length > 1) return then.call(valueOrPromise, onFulfilled, onRejected, onProgress);
+            return valueOrPromise;
+        } else {
+            if (arguments.length > 1 && onFulfilled) return resolved(onFulfilled(valueOrPromise));
+            return resolved(valueOrPromise);
+        }
+    }
+
+    function every(objectOrArray) {
+        return make(function(resolve, reject) {
+            var wait = [], resolved = 0, rejected = 0,
+                map = {}, out, i, n;
+
+            if (objectOrArray) {
+                if (objectOrArray.splice) {
+                    for (i = 0; i < objectOrArray.length; i++) map[wait.push(objectOrArray[i]) - 1] = i;
+                    out = [];
+                } else {
+                    for (n in objectOrArray) if (objectOrArray.hasOwnProperty(n)) map[wait.push(objectOrArray[n]) - 1] = n;
+                    out = {};
+                }
+            }
+
+            if (wait.length > 0) {
+                for (i = 0; i < wait.length; i++) (function(slot) {
+                    when(wait[slot], function(value) {
+                        if (rejected > 0) return;
+                        out[map[slot]] = value;
+                        if (++resolved == wait.length) resolve(out);
+                    }, function(error) {
+                        ++rejected, reject(error);
+                    });
+                })(i);
+            }
+            else resolve(out);
+        });
+    }
+
     make.rejected = rejected;
     make.resolved = resolved;
+    make.every = every;
+    make.when = when;
+    make.task = task;
 
     if (typeof module != 'undefined' && module.exports) {
         module.exports = make;

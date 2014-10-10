@@ -4,10 +4,6 @@ var vor = require('../vor'),
     sentinel2 = {sentinel: "sentinel2"},
     sentinel3 = {sentinel: "sentinel3"};
 
-vor({async:false});
-vor.resolved(dummy).then(function(val) { console.log('dummy:', dummy); });
-console.log('after');
-
 function xFactory() {
     return {
         tag: 'x',
@@ -18,12 +14,20 @@ function xFactory() {
 }
 
 function yFactory() {
-    return {
-        tag: 'y',
-        then: function (onFulfilled) {
-            onFulfilled(sentinel);
+    var numberOfTimesThenRetrieved = 0;
+    return Object.create(null, {
+        then: {
+            get: function () {
+                if (numberOfTimesThenRetrieved === 0) {
+                    ++numberOfTimesThenRetrieved;
+                    return function (onFulfilled) {
+                        onFulfilled(sentinel);
+                    };
+                }
+                return null;
+            }
         }
-    };
+    });
 }
 
 var promise = vor.resolved(dummy).then(function onBasePromiseFulfilled() {
@@ -36,8 +40,6 @@ promise.then(function onPromiseFulfilled(value) {
     console.log('VAL:', value);
 });
 
-var a = vor.Deferred(function() {}).then(null, function(reason) {
-    console.log('CANCEL:', reason);
+vor.every([vor.resolved(sentinel)]).then(function(value) {
+    console.log('WVAL:', value);
 });
-
-a.cancel();
