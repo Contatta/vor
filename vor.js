@@ -216,32 +216,43 @@
     }
 
     function every(objectOrArray) {
-        return make(function(resolve, reject) {
-            var wait = [], resolved = 0, rejected = 0,
-                map = {}, out, i, n;
-
-            if (objectOrArray) {
-                if (objectOrArray.splice) {
-                    for (i = 0; i < objectOrArray.length; i++) map[wait.push(objectOrArray[i]) - 1] = i;
-                    out = [];
-                } else {
-                    for (n in objectOrArray) if (objectOrArray.hasOwnProperty(n)) map[wait.push(objectOrArray[n]) - 1] = n;
-                    out = {};
-                }
+        var wait = [], resolved = 0, rejected = 0, canceled = 0,
+            map = {}, out, i, n;
+        if (objectOrArray) {
+            if (objectOrArray.splice) {
+                for (i = 0; i < objectOrArray.length; i++) map[wait.push(objectOrArray[i]) - 1] = i;
+                out = [];
+            } else {
+                for (n in objectOrArray) if (objectOrArray.hasOwnProperty(n)) map[wait.push(objectOrArray[n]) - 1] = n;
+                out = {};
             }
-
-            if (wait.length > 0) {
-                for (i = 0; i < wait.length; i++) (function(slot) {
-                    when(wait[slot], function(value) {
+        }
+        var total = wait.length;
+        return make(function everyResolver(resolveMe, rejectMe, progressMe) {
+            if (total > 0) {
+                for (i = 0; i < total; i++) (function everySlot(slot) {
+                    var valueOrPromise = wait[slot];
+                    when(valueOrPromise, function everyWhenResolved(value) {
                         if (rejected > 0) return;
                         out[map[slot]] = value;
-                        if (++resolved == wait.length) resolve(out);
-                    }, function(error) {
-                        ++rejected, reject(error);
+                        progressMe({resolved: ++resolved, total: total});
+                        if (resolved >= total) resolveMe(out);
+                    }, function everyWhenRejected(reason) {
+                        ++rejected, (canceled <= 0) && rejectMe(reason);
                     });
                 })(i);
             }
-            else resolve(out);
+            else resolveMe(out);
+        }, function everyCanceler(cancelMe) {
+            if (total > 0) {
+                for (i = 0; i < total; i++) (function everySlot(slot) {
+                    ++cancelled;
+                    var valueOrPromise = wait[slot],
+                        cancel = valueOrPromise && valueOrPromise.cancel;
+                    if (typeof cancel === 'function') cancel.call(valueOrPromise);
+                })(i);
+            }
+            cancelMe();
         });
     }
 
@@ -249,7 +260,7 @@
     make.resolved = resolved;
     make.every = every;
     make.when = when;
-    make.task = task;
+    make.task = function taskAccessor(fn) { return task(fn); };
 
     if (typeof module != 'undefined' && module.exports) {
         module.exports = make;
