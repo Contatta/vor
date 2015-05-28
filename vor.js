@@ -29,9 +29,14 @@
             try {
                 var out = value;
                 if (typeof onFulfilled === 'function') out = onFulfilled(value), out = out !== empty ? out : value;
-                var then = out && out.then;
+                var then = out && out.then,
+                    always = out && out.always,
+                    done = out && out.done;
+
                 if (out === promise || value === promise) throw new TypeError("same promise");
                 else if (typeof then === 'function') then.call(out, resolveNext, rejectNext, progressNext);
+                else if (typeof always === 'function') always.call(out, resolveNext);
+                else if (typeof done === 'function') done.call(out, resolveNext);
                 else resolveNext(out);
             }
             catch (e) {
@@ -45,10 +50,15 @@
             try {
                 var out;
                 if (typeof onRejected === 'function') out = onRejected(reason);
-                var then = out && out.then;
+                var then = out && out.then,
+                    always = out && out.always,
+                    fail = out && out.fail;
+
                 if (out === promise || reason === promise) throw new TypeError("same promise");
                 else if (out === empty) rejectNext(reason);
                 else if (typeof then === 'function') then.call(out, resolveNext, rejectNext, progressNext);
+                else if (typeof always === 'function') always.call(out, rejectNext);
+                else if (typeof fail === 'function') fail.call(out, rejectNext);
                 else resolveNext(out);
             }
             catch (e) {
@@ -86,6 +96,9 @@
         var promise = {
             tag: promiseTag,
             then: promiseThen,
+            always: promiseAlways,
+            done: promiseDone,
+            fail: promiseFail,
             state: promiseState
         };
 
@@ -101,8 +114,13 @@
         function resolveMe(value) {
             if (state !== STATE_PENDING) return;
             try {
-                var then = value && value.then;
+                var then = value && value.then,
+                    always = value && value.always,
+                    done = value && value.done;
+
                 if (typeof then === 'function') { then.call(value, resolveMe, rejectMe, progressMe); return; }
+                if (typeof always === 'function') { always.call(value, resolveMe); return; }
+                if (typeof done === 'function') { done.call(value, resolveMe); return; }
             } catch (e) {
                 return rejectMe(e);
             }
@@ -116,8 +134,13 @@
         function rejectMe(reason) {
             if (state !== STATE_PENDING) return;
             try {
-                var then = reason && reason.then;
+                var then = reason && reason.then,
+                    always = reason && reason.always,
+                    fail = reason && reason.fail;
+
                 if (typeof then === 'function') { then.call(reason, resolveMe, rejectMe, progressMe); return; }
+                if (typeof always === 'function') { always.call(reason, rejectMe); return; }
+                if (typeof fail === 'function') { fail.call(reason, rejectMe); return; }
             } catch (e) {
                 return rejectMe(e);
             }
@@ -143,6 +166,51 @@
         function promiseTag() { return tagged; }
         function promiseState() { return STATE_TO_STRING[state]; }
         function promiseCancel() { canceler.call(promise, cancelMe); }
+        function promiseFail(onRejected) {
+            if (state === STATE_PENDING) {
+                return make(function (resolveNext, rejectNext, progressNext) {
+                    queue.push([
+                        null,
+                        chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this)
+                    ]);
+                }, canceler && promiseCancel, tagger(tag)); // cancel is always the original (propagates through reject)
+            } else if (state === STATE_REJECTED) {
+                return make(function(resolveNext, rejectNext, progressNext) {
+                    task(chainReject(onRejected, resolveNext, rejectNext, progressNext).bind(null, this, keep));
+                }, canceler && promiseCancel, tagger(tag)); // cancel is always the original (propagates through reject)
+            }
+        }
+        function promiseAlways(onFulfilledOrRejected) {
+            if (state === STATE_PENDING) {
+                return make(function (resolveNext, rejectNext, progressNext) {
+                    queue.push([
+                        chainResolve(onFulfilledOrRejected, resolveNext, rejectNext, progressNext).bind(null, this),
+                        chainReject(onFulfilledOrRejected, resolveNext, rejectNext, progressNext).bind(null, this)
+                    ]);
+                }, canceler && promiseCancel, tagger(tag)); // cancel is always the original (propagates through reject)
+            } else if (state === STATE_FULFILLED) {
+                return make(function(resolveNext, rejectNext, progressNext) {
+                    task(chainResolve(onFulfilledOrRejected, resolveNext, rejectNext, progressNext).bind(null, this, keep));
+                }, canceler && promiseCancel, tagger(tag)); // cancel is always the original (propagates through reject)
+            } else if (state === STATE_REJECTED) {
+                return make(function(resolveNext, rejectNext, progressNext) {
+                    task(chainReject(onFulfilledOrRejected, resolveNext, rejectNext, progressNext).bind(null, this, keep));
+                }, canceler && promiseCancel, tagger(tag)); // cancel is always the original (propagates through reject)
+            }
+        }
+        function promiseDone(onFulfilled) {
+            if (state === STATE_PENDING) {
+                return make(function (resolveNext, rejectNext, progressNext) {
+                    queue.push([
+                        chainResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, this)
+                    ]);
+                }, canceler && promiseCancel, tagger(tag)); // cancel is always the original (propagates through reject)
+            } else if (state === STATE_FULFILLED) {
+                return make(function(resolveNext, rejectNext, progressNext) {
+                    task(chainResolve(onFulfilled, resolveNext, rejectNext, progressNext).bind(null, this, keep));
+                }, canceler && promiseCancel, tagger(tag)); // cancel is always the original (propagates through reject)
+            }
+        }
         function promiseThen(onFulfilled, onRejected, onProgress) {
             if (state === STATE_PENDING) {
                 return make(function (resolveNext, rejectNext, progressNext) {
@@ -175,6 +243,9 @@
         }).bind(this));
         this.tag = this.promise.tag;
         this.then = this.promise.then;
+        this.always = this.promise.always;
+        this.done = this.promise.done;
+        this.fail = this.promise.fail;
         this.state = this.promise.state;
         if (cancel)
         {
